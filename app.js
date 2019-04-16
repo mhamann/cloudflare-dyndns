@@ -3,16 +3,23 @@
 var path = require('path');
 var request = require('request');
 var every = require('schedule').every;
+var addSeconds = require('date-fns').addSeconds;
 var cloudflare = require('cloudflare');
-var config = require('./config.json');
 var zones = [];
 var lastKnownGoodIP = "";
 var options = {};
+
+const mothership = require('mothership-client');
+const config = mothership.init({
+    key: process.env.MOTHERSHIP_KEY
+});
+
 var headers = {
     'X-Auth-Email': config.credentials.email,
     'X-Auth-Key': config.credentials.key,
     'Content-Type': 'application/json'
 };
+
 var listUrl = "https://api.cloudflare.com/client/v4/zones";
 
 console.log('CloudFlare DynDNS Activated.\n');
@@ -54,24 +61,29 @@ function fetchRecordDetails(zoneIndex,recordIndex){
   });
 }
 
-function startScheduler(){
-  console.log('Scheduler Started...\n');
-  every(config.updateFrequency+'s').do(function() {
-    request('http://ipv4.icanhazip.com', function (error, response, body) {
-      var externalIP = body.replace(/^\s+|\s+$/g, '');;
-      console.log('Current External IP is - <'+externalIP+'>');
-      for (var x = 0; x < zones.length; x++) {
-        for (var y = 0; y < zones[x].records.length; y++) {
-          if(zones[x].records[y].address != externalIP){
-            console.log('Checked '+zones[x].records[y].name+' and IP in CloudFlare Is Different To External IP. Updating Record...');
-            updateRecord(x,y,externalIP);
-          } else {
-            console.log('Checked '+zones[x].records[y].name+' and IP in CloudFlare Matches External IP. No update required.');
-          }
+function runProcess() {
+  request('http://ipv4.icanhazip.com', function (error, response, body) {
+    var externalIP = body.replace(/^\s+|\s+$/g, '');;
+    console.log('Current External IP is - <'+externalIP+'>');
+    for (var x = 0; x < zones.length; x++) {
+      for (var y = 0; y < zones[x].records.length; y++) {
+        if(zones[x].records[y].address != externalIP){
+          console.log('Checked '+zones[x].records[y].name+' and IP in CloudFlare Is Different To External IP. Updating Record...');
+          updateRecord(x,y,externalIP);
+        } else {
+          console.log('Checked '+zones[x].records[y].name+' and IP in CloudFlare Matches External IP. No update required.');
         }
       }
-    });
+    }
+
+    console.log(`Next check at ${addSeconds(new Date(), config.updateFrequency)}.`);
   });
+}
+
+function startScheduler(){
+  console.log('Scheduler Started...\n');
+  runProcess();
+  every(config.updateFrequency+'s').do(runProcess);
 }
 
 function updateRecord(zoneIndex,recordIndex,externalIP){
